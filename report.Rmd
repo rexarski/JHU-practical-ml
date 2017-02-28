@@ -1,0 +1,124 @@
+---
+title: "A Study of Using Basic Machine Learning on Quantified Self Movement: How Well People Exercise"
+author: "Rui Qiu"
+date: '2017-02-27'
+output: html_document
+---
+
+## Executive Summary
+
+Based on the data from [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har), we want to predict the manner in which test subjects did the exercise. Basically, the algorithm itself is going to classify the variables in the testing set, after learning features from the training set.
+
+## Setup
+
+## Data Preprocessing  
+```{r, cache=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+## Processing Data
+
+### Data Import
+
+The data is provided by [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har).
+
+- Specifically, the training data is [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv).
+- The testing data is [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+```{r, cache=TRUE}
+train0 <- read.csv("pml-training.csv")
+test0 <- read.csv("pml-testing.csv")
+dim(train0)
+dim(test0)
+```
+
+The training data has 19622 observations and 160 variables.
+
+The testing data has 20 observations and 160 variables as well.
+
+Our goal is to predict the variable `classe` of testing data after training our algorithm in the training data.
+
+### Data Cleaning and Data Manipulation
+
+After loading data, we
+
+- delete columns in training data that have missing values
+- remove predictors with little predicting power over `classe`
+- divide training data into two partitions with a 7:3 ratio. 70% of training data will used purely for training, the 30% left will used for validation
+
+The testing data would be loaded until the final test (the quiz problems).
+
+```{r, cache=TRUE}
+sum(complete.cases(train0))
+train0 <- train0[, colSums(is.na(train0)) == 0] 
+test0 <- test0[, colSums(is.na(test0)) == 0] 
+
+classe <- train0$classe
+train_delete <- grepl("^X|timestamp|window", names(train0))
+train0 <- train0[, !train_delete]
+train1 <- train0[, sapply(train0, is.numeric)]
+train1$classe <- classe
+test_delete <- grepl("^X|timestamp|window", names(test0))
+test0 <- test0[, !test_delete]
+test1 <- test0[, sapply(test0, is.numeric)]
+
+set.seed(22519) # For reproducibile purpose
+inTrain <- createDataPartition(train1$classe, p=0.70, list=F)
+toTrain <- train1[inTrain, ]
+toValid <- train1[-inTrain, ]
+```
+
+## Prediction Algorithm (5-fold Random Forest)
+The reason why we should choose random forest here is because it automatically picks vital variables out and it is quite robust when dealing with correlated covariates and outliers.
+
+```{r, cache=TRUE}
+control <- trainControl(method="cv", 5)
+forestModel <- train(classe ~ ., data=toTrain, method="rf", trControl=control, ntree=250)
+forestModel
+```
+
+Predict over validation set.
+
+```{r, cache=TRUE}
+predictForest <- predict(forestModel, toValid)
+confusionMatrix(toValid$classe, predictForest)
+```
+
+Show accuracy of our algorithm.
+
+```{r, cache=TRUE}
+accuracy <- postResample(predictForest, toValid$classe)
+accuracy
+error <- 1 - as.numeric(confusionMatrix(toValid$classe, predictForest)$overall[1])
+error
+```
+
+The accuracy of our 5-fold random forest is approximately 99.39% and the out-of-sample error is 0.61%.
+
+## Test on Test Data
+We now apply the model to the real testing data.
+
+```{r, cache=TRUE}
+# Remove problem_id
+result <- predict(forestModel, test1[, -length(names(test1))])
+result
+```
+
+## Conclusion
+
+The predicted for 20 tests subjects are:
+
+```
+B A B A A E D B A A B C B A E E A B B B
+```
+
+## Appendices
+Correlation Matrix
+```{r, cache=TRUE}
+corrPlot <- cor(toTrain[, -length(names(toTrain))])
+corrplot(corrPlot, method="color")
+```
